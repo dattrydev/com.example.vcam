@@ -41,58 +41,54 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public class HookMain implements IXposedHookLoadPackage {
-    public static Surface mSurface;
-    public static SurfaceTexture mSurfacetexture;
-    public static MediaPlayer mMediaPlayer;
-    public static SurfaceTexture fake_SurfaceTexture;
+    // Camera1
     public static Camera origin_preview_camera;
-
     public static Camera camera_onPreviewFrame;
     public static Camera start_preview_camera;
-    public static volatile byte[] data_buffer = {0};
-    public static byte[] input;
-    public static int mhight;
-    public static int mwidth;
-    public static boolean is_someone_playing;
-    public static boolean is_hooked;
-    public static VideoToFrames hw_decode_obj;
-    public static VideoToFrames c2_hw_decode_obj;
-    public static VideoToFrames c2_hw_decode_obj_1;
+    public static Camera mcamera1;
+    public static SurfaceTexture mSurfacetexture;
+    public static SurfaceTexture fake_SurfaceTexture;
     public static SurfaceTexture c1_fake_texture;
     public static Surface c1_fake_surface;
+    public static Surface mSurface;
     public static SurfaceHolder ori_holder;
     public static MediaPlayer mplayer1;
-    public static Camera mcamera1;
-    public int imageReaderFormat = 0;
-    public static boolean is_first_hook_build = true;
-
-    public static int onemhight;
-    public static int onemwidth;
+    public static MediaPlayer mMediaPlayer;
+    public static byte[] data_buffer = {0};
+    public static boolean is_hooked;
+    public static boolean is_someone_playing;
+    public static int mwidth, mhight;
+    public static int onemwidth, onemhight;
+    public static VideoToFrames hw_decode_obj;
     public static Class camera_callback_calss;
 
-    public static String video_path = "/storage/emulated/0/DCIM/Camera1/";
-
-    public static Surface c2_preview_Surfcae;
-    public static Surface c2_preview_Surfcae_1;
-    public static Surface c2_reader_Surfcae;
-    public static Surface c2_reader_Surfcae_1;
-    public static MediaPlayer c2_player;
-    public static MediaPlayer c2_player_1;
+    // Camera2
+    public static Surface c2_preview_Surfcae, c2_preview_Surfcae_1;
+    public static Surface c2_reader_Surfcae, c2_reader_Surfcae_1;
+    public static MediaPlayer c2_player, c2_player_1;
     public static Surface c2_virtual_surface;
     public static SurfaceTexture c2_virtual_surfaceTexture;
-    public boolean need_recreate;
     public static CameraDevice.StateCallback c2_state_cb;
     public static CaptureRequest.Builder c2_builder;
-    public static SessionConfiguration fake_sessionConfiguration;
-    public static SessionConfiguration sessionConfiguration;
+    public static SessionConfiguration fake_sessionConfiguration, sessionConfiguration;
     public static OutputConfiguration outputConfiguration;
-    public boolean need_to_show_toast = true;
-
-    public int c2_ori_width = 1280;
-    public int c2_ori_height = 720;
-
+    public static VideoToFrames c2_hw_decode_obj, c2_hw_decode_obj_1;
     public static Class c2_state_callback;
+    public int c2_ori_width = 1280, c2_ori_height = 720;
+    public boolean need_recreate;
+    public boolean is_first_hook_build = true;
+    public int imageReaderFormat = 0;
+
+    // CameraX
+    public static Object camerax_surface_provider;
+    public static MediaPlayer camerax_player;
+    public static boolean is_camerax_active = false;
+
+    // Common
+    public static String video_path = "/storage/emulated/0/DCIM/Camera1/";
     public Context toast_content;
+    public boolean need_to_show_toast = true;
+    public static byte[] input;
 
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Exception {
         XposedHelpers.findAndHookMethod("android.hardware.Camera", lpparam.classLoader, "setPreviewTexture", SurfaceTexture.class, new XC_MethodHook() {
@@ -214,6 +210,73 @@ public class HookMain implements IXposedHookLoadPackage {
                     process_camera2_init(c2_state_callback);
                 }
             });
+        }
+
+        try {
+            XposedHelpers.findAndHookMethod("androidx.camera.core.Preview", lpparam.classLoader,
+                "setSurfaceProvider", "androidx.camera.core.Preview$SurfaceProvider", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        File file = new File(video_path + "virtual.mp4");
+                        File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/Camera1/" + "disable.jpg");
+                        if (!file.exists() || control_file.exists()) return;
+
+                        XposedBridge.log("【VCAM】Hook CameraX Preview.setSurfaceProvider");
+
+                        camerax_surface_provider = param.args[0];
+                        Object fakeSurfaceProvider = createFakeCameraXSurfaceProvider(param.args[0]);
+                        param.args[0] = fakeSurfaceProvider;
+                        is_camerax_active = true;
+                    }
+                });
+        } catch (Throwable e) {
+            XposedBridge.log("【VCAM】CameraX Preview not found in this app: " + e.getMessage());
+        }
+
+        try {
+            XposedHelpers.findAndHookMethod("androidx.camera.lifecycle.ProcessCameraProvider", lpparam.classLoader,
+                "bindToLifecycle", "androidx.lifecycle.LifecycleOwner", "androidx.camera.core.CameraSelector",
+                "[androidx.camera.core.UseCase]", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        File file = new File(video_path + "virtual.mp4");
+                        File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/Camera1/" + "no_toast.jpg");
+                        need_to_show_toast = !toast_control.exists();
+                        if (toast_content != null && need_to_show_toast) {
+                            try {
+                                Toast.makeText(toast_content, "Đã hook CameraX vào app\n" + lpparam.packageName, Toast.LENGTH_SHORT).show();
+                            } catch (Exception e) {}
+                        }
+                        XposedBridge.log("【VCAM】CameraX bindToLifecycle detected");
+                    }
+                });
+        } catch (Throwable e) {
+            XposedBridge.log("【VCAM】CameraX ProcessCameraProvider not found: " + e.getMessage());
+        }
+
+        try {
+            XposedHelpers.findAndHookMethod("androidx.camera.core.ImageCapture", lpparam.classLoader,
+                "takePicture", "androidx.camera.core.ImageCapture$OutputFileOptions",
+                "androidx.core.content.ContextCompat", "androidx.camera.core.ImageCapture$OnImageSavedCallback",
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/Camera1/" + "disable.jpg");
+                        if (control_file.exists()) return;
+
+                        XposedBridge.log("【VCAM】CameraX takePicture intercepted");
+                        File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/Camera1/" + "no_toast.jpg");
+                        need_to_show_toast = !toast_control.exists();
+                        if (toast_content != null && need_to_show_toast) {
+                            try {
+                                Toast.makeText(toast_content, "CameraX chụp ảnh bị hook", Toast.LENGTH_SHORT).show();
+                            } catch (Exception e) {}
+                        }
+                        processCameraXImageCapture(param);
+                    }
+                });
+        } catch (Throwable e) {
+            XposedBridge.log("【VCAM】CameraX ImageCapture not found: " + e.getMessage());
         }
 
 
@@ -785,6 +848,103 @@ public class HookMain implements IXposedHookLoadPackage {
             }
         }
         XposedBridge.log("【VCAM】Camera2处理过程完全执行");
+    }
+
+    private Object createFakeCameraXSurfaceProvider(Object originalProvider) {
+        return java.lang.reflect.Proxy.newProxyInstance(
+            originalProvider.getClass().getClassLoader(),
+            originalProvider.getClass().getInterfaces(),
+            new java.lang.reflect.InvocationHandler() {
+                @Override
+                public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {
+                    if ("onSurfaceRequested".equals(method.getName())) {
+                        XposedBridge.log("【VCAM】CameraX Surface requested, providing virtual surface");
+                        if (c2_virtual_surface == null) create_virtual_surface();
+                        Object surfaceRequest = args[0];
+                        provideCameraXVirtualSurface(surfaceRequest);
+                        startCameraXVideoPlayback();
+                        return null;
+                    }
+                    return method.invoke(originalProvider, args);
+                }
+            }
+        );
+    }
+
+    private void provideCameraXVirtualSurface(Object surfaceRequest) {
+        try {
+            java.lang.reflect.Method provideSurfaceMethod = surfaceRequest.getClass().getMethod("provideSurface",
+                Surface.class, Executor.class, Runnable.class);
+
+            provideSurfaceMethod.invoke(surfaceRequest, c2_virtual_surface,
+                java.util.concurrent.Executors.newSingleThreadExecutor(),
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        XposedBridge.log("【VCAM】CameraX Virtual surface provided");
+                    }
+                });
+        } catch (Exception e) {
+            XposedBridge.log("【VCAM】Error providing CameraX virtual surface: " + e.toString());
+        }
+    }
+
+    private void startCameraXVideoPlayback() {
+        try {
+            File file = new File(video_path + "virtual.mp4");
+            if (!file.exists()) return;
+
+            if (camerax_player != null) {
+                camerax_player.release();
+            }
+            camerax_player = new MediaPlayer();
+            if (c2_preview_Surfcae != null) {
+                camerax_player.setSurface(c2_preview_Surfcae);
+            }
+            File sfile = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/Camera1/" + "no-silent.jpg");
+            if (!sfile.exists()) camerax_player.setVolume(0, 0);
+
+            camerax_player.setLooping(true);
+            camerax_player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                @Override
+                public void onPrepared(MediaPlayer mp) {
+                    camerax_player.start();
+                    XposedBridge.log("【VCAM】CameraX video playback started");
+                }
+            });
+
+            camerax_player.setDataSource(video_path + "virtual.mp4");
+            camerax_player.prepare();
+        } catch (Exception e) {
+            XposedBridge.log("【VCAM】Error starting CameraX video playback: " + e.toString());
+        }
+    }
+
+    private void processCameraXImageCapture(XC_MethodHook.MethodHookParam param) {
+        try {
+            Object callback = param.args[2]; // OnImageSavedCallback
+            XposedHelpers.findAndHookMethod(callback.getClass(), "onImageSaved",
+                "androidx.camera.core.ImageCapture$OutputFileResults", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam callbackParam) throws Throwable {
+                        replaceCameraXCapturedImage(callbackParam);
+                    }
+                });
+        } catch (Exception e) {
+            XposedBridge.log("【VCAM】Error processing CameraX image capture: " + e.toString());
+        }
+    }
+
+    private void replaceCameraXCapturedImage(XC_MethodHook.MethodHookParam param) {
+        try {
+            Bitmap fakeBitmap = getBMP(video_path + "1000.bmp");
+            if (fakeBitmap != null) {
+                XposedBridge.log("【VCAM】CameraX captured image replaced");
+                // TODO: Tuỳ app, bạn có thể lưu bitmap này ra file hoặc ghi vào output, tuỳ logic app.
+            }
+        } catch (Exception e) {
+            XposedBridge.log("【VCAM】Error replacing CameraX captured image: " + e.toString());
+        }
     }
 
     private Surface create_virtual_surface() {
