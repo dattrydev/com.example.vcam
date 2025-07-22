@@ -15,11 +15,10 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public class HookMain implements IXposedHookLoadPackage {
+
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
-        if (!lpparam.packageName.equals("id.dana")) return;
-
-        // Hook Camera1 (API)
+        // --- HOOK CAMERA 1 ---
         try {
             XposedHelpers.findAndHookMethod(
                 "android.hardware.Camera$PreviewCallback",
@@ -28,7 +27,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 byte[].class, Camera.class,
                 new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    protected void beforeHookedMethod(MethodHookParam param) {
                         Camera cam = (Camera) param.args[1];
                         Camera.Parameters params = cam.getParameters();
                         Camera.Size size = params.getPreviewSize();
@@ -44,68 +43,91 @@ public class HookMain implements IXposedHookLoadPackage {
             Log.e("VCAM", "Camera1 hook failed: " + t);
         }
 
-        // Hook Camera2 (ImageReader)
+        // --- HOOK CAMERA 2: ImageReader callback ---
+        if (Build.VERSION.SDK_INT >= 21) {
+            try {
+                XposedHelpers.findAndHookMethod(
+                    "android.media.ImageReader$OnImageAvailableListener",
+                    lpparam.classLoader,
+                    "onImageAvailable",
+                    ImageReader.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            ImageReader reader = (ImageReader) param.args[0];
+                            Image image = null;
+                            try {
+                                image = reader.acquireLatestImage();
+                                if (image != null && image.getFormat() == ImageFormat.YUV_420_888) {
+                                    int w = image.getWidth();
+                                    int h = image.getHeight();
+                                    byte[] fakeFrame = VideoFrameProvider.getNextFrameNV21(w, h);
+                                    if (fakeFrame != null && fakeFrame.length == w*h*3/2) {
+                                        ByteBuffer yBuf = image.getPlanes()[0].getBuffer();
+                                        ByteBuffer uBuf = image.getPlanes()[1].getBuffer();
+                                        ByteBuffer vBuf = image.getPlanes()[2].getBuffer();
+                                        // Copy NV21 to YUV_420_888 (simple, may need adjust for chroma offset)
+                                        yBuf.put(fakeFrame, 0, w*h);
+                                        uBuf.put(fakeFrame, w*h, w*h/4);
+                                        vBuf.put(fakeFrame, w*h+w*h/4, w*h/4);
+                                    }
+                                    image.close();
+                                }
+                            } catch (Exception e) {
+                                Log.e("VCAM", "Camera2 hook error: " + e);
+                                if (image != null) image.close();
+                            }
+                        }
+                    }
+                );
+            } catch (Throwable t) {
+                Log.e("VCAM", "Camera2 hook failed: " + t);
+            }
+        }
+
+        // --- HOOK CameraX: ImageAnalysis analyzer ---
         try {
+            Class<?> imageAnalysisClass = lpparam.classLoader.loadClass("androidx.camera.core.ImageAnalysis$Analyzer");
             XposedHelpers.findAndHookMethod(
-                "android.media.ImageReader$OnImageAvailableListener",
-                lpparam.classLoader,
-                "onImageAvailable",
-                ImageReader.class,
+                imageAnalysisClass,
+                "analyze",
+                lpparam.classLoader.loadClass("androidx.camera.core.ImageProxy"),
                 new XC_MethodHook() {
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        ImageReader reader = (ImageReader) param.args[0];
-                        Image image = reader.acquireLatestImage();
-                        if (image != null) {
-                            int w = image.getWidth();
-                            int h = image.getHeight();
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        Object imageProxy = param.args[0];
+                        try {
+                            int w = (int) imageProxy.getClass().getMethod("getWidth").invoke(imageProxy);
+                            int h = (int) imageProxy.getClass().getMethod("getHeight").invoke(imageProxy);
                             byte[] fakeFrame = VideoFrameProvider.getNextFrameNV21(w, h);
-                            if (fakeFrame != null && image.getFormat() == ImageFormat.YUV_420_888) {
-                                // Ghi buffer NV21 vào image planes (YUV_420_888)
-                                ByteBuffer yBuffer = image.getPlanes()[0].getBuffer();
-                                ByteBuffer uBuffer = image.getPlanes()[1].getBuffer();
-                                ByteBuffer vBuffer = image.getPlanes()[2].getBuffer();
-                                yBuffer.put(fakeFrame, 0, w*h);
-                                uBuffer.put(fakeFrame, w*h, (w*h)/4);
-                                vBuffer.put(fakeFrame, w*h+(w*h)/4, (w*h)/4);
-                            }
-                            image.close();
+                            // TODO: set buffer for CameraX (may require reflection for planes)
+                        } catch (Exception e) {
+                            Log.e("VCAM", "CameraX analyze hook error: " + e);
                         }
                     }
                 }
             );
         } catch (Throwable t) {
-            Log.e("VCAM", "Camera2 hook failed: " + t);
+            Log.e("VCAM", "CameraX hook failed: " + t);
         }
 
-        // Hook CameraX (ImageAnalysis)
+        // --- HOOK CameraX: Preview ---
         try {
-            Class<?> imageAnalysisClass = lpparam.classLoader.loadClass("androidx.camera.core.ImageAnalysis$Analyzer");
-            for (Class<?> clazz : lpparam.classLoader.getDefinedClasses()) {
-                if (clazz.getName().startsWith("androidx.camera.core") && clazz.getName().contains("ImageAnalysis")) {
-                    for (java.lang.reflect.Method method : clazz.getDeclaredMethods()) {
-                        if (method.getName().equals("analyze")) {
-                            XposedHelpers.findAndHookMethod(
-                                clazz,
-                                "analyze",
-                                lpparam.classLoader.loadClass("androidx.camera.core.ImageProxy"),
-                                new XC_MethodHook() {
-                                    @Override
-                                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                        Object imageProxy = param.args[0];
-                                        int w = (int) imageProxy.getClass().getMethod("getWidth").invoke(imageProxy);
-                                        int h = (int) imageProxy.getClass().getMethod("getHeight").invoke(imageProxy);
-                                        byte[] fakeFrame = VideoFrameProvider.getNextFrameNV21(w, h);
-                                        // Có thể cần thêm logic để set buffer vào imageProxy (tuỳ vào CameraX version)
-                                    }
-                                }
-                            );
-                        }
+            XposedHelpers.findAndHookMethod(
+                "androidx.camera.core.Preview",
+                lpparam.classLoader,
+                "setSurfaceProvider",
+                lpparam.classLoader.loadClass("androidx.camera.core.Preview$SurfaceProvider"),
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        Log.e("VCAM", "CameraX Preview.setSurfaceProvider hooked");
+                        // You can try to replace the SurfaceProvider here if needed
                     }
                 }
-            }
+            );
         } catch (Throwable t) {
-            Log.e("VCAM", "CameraX hook failed: " + t);
+            Log.e("VCAM", "CameraX Preview hook failed: " + t);
         }
     }
 }

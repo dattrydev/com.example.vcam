@@ -3,7 +3,6 @@ package com.example.vcam;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.util.Log;
-
 import java.io.File;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -44,7 +43,6 @@ public class VideoFrameProvider {
         }
     }
 
-    // Convert Bitmap -> NV21
     public static byte[] bitmapToNV21(Bitmap bitmap) {
         int inputWidth = bitmap.getWidth();
         int inputHeight = bitmap.getHeight();
@@ -55,7 +53,6 @@ public class VideoFrameProvider {
         return yuv;
     }
 
-    // ARGB -> NV21 (YUV420SP)
     private static void encodeYUV420SP(byte[] yuv420sp, int[] argb, int width, int height) {
         final int frameSize = width * height;
         int yIndex = 0;
