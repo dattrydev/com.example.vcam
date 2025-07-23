@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.vcam">
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Yêu cầu quyền đọc file video -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
     <application
         android:allowBackup="true"
@@ -8,33 +11,27 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.VCAM">
+        android:theme="@style/Theme.VCam"
+        tools:targetApi="31">
 
-        <activity
-            android:name=".MainActivity"
-            android:label="@string/app_name"
-            android:theme="@style/Theme.VCAM">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-
-
-
+        <!-- Khai báo đây là một module Xposed -->
         <meta-data
             android:name="xposedmodule"
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="安卓虚拟摄像头" />
+            android:value="Hook Camera2 API to provide a video stream." />
         <meta-data
             android:name="xposedminversion"
-            android:value="51" />
+            android:value="52" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
-
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-
 </manifest>
